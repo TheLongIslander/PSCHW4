@@ -7,7 +7,7 @@
 clear; clc; close all;
 
 %% 1. Set Random Seed and Generate Bit Sequence
-RUID = 123456; % Replace with your RUID
+RUID = 20800; % Replace with your RUID
 rng(RUID);
 bb = randi([0, 1], 1, 1000); % Generate 1000 random bits
 
@@ -22,10 +22,11 @@ t = 0:Ts:T-Ts; % Time vector for one bit duration
 % Define square pulse p(t)
 p_t = A * ones(size(t));
 
-% Define raised cosine pulse p_s(t)
+% Define raised cosine pulse p_s(t) with normalization
 r = 5; % Roll-off factor
 p_s_t = sinc(t/T) .* cos(pi*r*t/T) ./ (1 - (2*r*t/T).^2);
 p_s_t(isnan(p_s_t)) = 0; % Avoid division by zero errors
+p_s_t = p_s_t / max(abs(p_s_t)); % Normalize amplitude
 
 % Generate s(t) and s_s(t)
 s = [];
@@ -39,20 +40,7 @@ for i = 1:10 % Generate signal for first 10 bits
         s_s = [s_s -p_s_t]; % Transmit -p_s(t)
     end
 end
-% Debugging: Check if s_s(t) is being generated correctly
-disp('First few values of s_s(t):');
-disp(s_s(1:10));
 
-disp('Max value of s_s(t):');
-disp(max(abs(s_s))));
-
-% Plot to verify raised cosine pulses are not zero
-figure;
-plot(t_full, s_s);
-title('Baseband Signal using Raised Cosine Pulse');
-xlabel('Time (s)');
-ylabel('Amplitude');
-grid on;
 % Time vector for first 10 bits
 t_full = 0:Ts:(10*T-Ts);
 
@@ -64,6 +52,7 @@ title('Baseband Signal using Square Pulse');
 xlabel('Time (s)');
 ylabel('Amplitude');
 grid on;
+saveas(gcf, 'baseband_square.png');
 
 subplot(2,1,2);
 plot(t_full, s_s, 'r');
@@ -71,6 +60,7 @@ title('Baseband Signal using Raised Cosine Pulse');
 xlabel('Time (s)');
 ylabel('Amplitude');
 grid on;
+saveas(gcf, 'baseband_raised_cosine.png');
 
 %% 3. Up-conversion
 fc = 5; % Carrier frequency in Hz
@@ -78,14 +68,7 @@ u = s .* cos(2*pi*fc*t_full);
 u_s = s_s .* cos(2*pi*fc*t_full);
 
 % Normalize u_s to prevent near-zero FFT values
-if max(abs(u_s)) > 0
-    u_s = u_s / max(abs(u_s)); % Normalize to avoid small values
-end
-disp('First few values of u_s(t):');
-disp(u_s(1:10));
-
-disp('Max value of u_s(t):');
-disp(max(abs(u_s)));
+u_s = u_s / max(abs(u_s));
 
 % Compute FFT
 U = fftshift(abs(fft(u)));
@@ -102,6 +85,7 @@ xlabel('Frequency (Hz)');
 ylabel('Power (dB)');
 grid on;
 xlim([-fc-5 fc+5]); % Focus on carrier region
+saveas(gcf, 'esd_u.png');
 
 subplot(2,1,2);
 plot(f, 10*log10(U_s.^2 + eps)); % Fix empty plot issue
@@ -110,19 +94,19 @@ xlabel('Frequency (Hz)');
 ylabel('Power (dB)');
 grid on;
 xlim([-fc-5 fc+5]); % Focus on carrier region
-
+saveas(gcf, 'esd_u_s.png');
 
 %% 4. Down-conversion and Filtering
 % Multiply by cos(2*pi*fc*t) to down-convert
 d = u .* cos(2*pi*fc*t_full);
 d_s = u_s .* cos(2*pi*fc*t_full);
 
-% Design LPF - Moving Average Filter
+% Design LPF - FIR Low Pass Filter with Hamming Window
 L1 = 2; % Filter length for case (a)
 L2 = 10; % Filter length for case (b)
 
-h1 = ones(1, L1) / L1; % Simple moving average filter
-h2 = ones(1, L2) / L2; % Wider moving average filter
+h1 = fir1(L1-1, 0.1, 'low', hamming(L1)); % FIR filter with Hamming window
+h2 = fir1(L2-1, 0.1, 'low', hamming(L2)); % Longer FIR filter
 
 d_f1 = filter(h1, 1, d);
 d_s_f1 = filter(h1, 1, d_s);
@@ -138,6 +122,7 @@ title('Down-converted Signal with L=2');
 xlabel('Time (s)');
 ylabel('Amplitude');
 grid on;
+saveas(gcf, 'downconverted_L2.png');
 
 subplot(2,1,2);
 plot(t_full, d_s_f1);
@@ -145,6 +130,7 @@ title('Down-converted Raised Cosine Signal with L=2');
 xlabel('Time (s)');
 ylabel('Amplitude');
 grid on;
+saveas(gcf, 'downconverted_raised_L2.png');
 
 figure;
 subplot(2,1,1);
@@ -153,6 +139,7 @@ title('Down-converted Signal with L=10');
 xlabel('Time (s)');
 ylabel('Amplitude');
 grid on;
+saveas(gcf, 'downconverted_L10.png');
 
 subplot(2,1,2);
 plot(t_full, d_s_f2);
@@ -160,18 +147,18 @@ title('Down-converted Raised Cosine Signal with L=10');
 xlabel('Time (s)');
 ylabel('Amplitude');
 grid on;
+saveas(gcf, 'downconverted_raised_L10.png');
 
 %% 5. Detection and Decoding
-% Correct sampling indices (mid-bit sampling)
 num_bits = 10;
 mid_sample_indices = round((T/2: T : num_bits * T) / Ts);
 
 % Ensure indices are within range
 mid_sample_indices = mid_sample_indices(mid_sample_indices <= length(d_f1));
 
-% Simple threshold detection
-decoded_bits_L2 = d_f1(mid_sample_indices) > 0; % Using L=2 filter
-decoded_bits_L10 = d_f2(mid_sample_indices) > 0; % Using L=10 filter
+% Threshold detection
+decoded_bits_L2 = d_f1(mid_sample_indices) > 0;
+decoded_bits_L10 = d_f2(mid_sample_indices) > 0;
 
 % Compute bit errors
 bit_errors_L2 = sum(decoded_bits_L2 ~= bb(1:length(decoded_bits_L2)));
@@ -196,17 +183,13 @@ disp(['Number of Bit Errors with L=10: ', num2str(bit_errors_L10)]);
 % - Filtering using LPF
 % - Threshold Detector for Bit Recovery
 
-%% 7. Save Figures for Report Submission
-saveas(gcf, 'down_converted_signals.png');
-
-% Create a table with bit errors
+%% 7. Save Report
 bit_error_table = table(["L=2"; "L=10"], [bit_errors_L2; bit_errors_L10], ...
     'VariableNames', {'Filter_Length', 'Bit_Errors'});
 
 disp('Bit Error Table:');
 disp(bit_error_table);
 
-%% Save Reportn
 writetable(bit_error_table, 'bit_error_report.csv');
 
 disp('Homework 3 completed. Check the generated plots and bit error report.');

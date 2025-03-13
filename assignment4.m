@@ -7,7 +7,7 @@
 clear; clc; close all;
 
 %% 1. Set Random Seed and Generate Bit Sequence
-RUID = 123456; % Replace with your RUID
+RUID = 208001821; % Replace with your RUID
 rng(RUID);
 bb = randi([0, 1], 1, 1000); % Generate 1000 random bits
 
@@ -25,7 +25,9 @@ p_t = A * ones(size(t));
 % Define raised cosine pulse p_s(t)
 r = 5; % Roll-off factor
 p_s_t = sinc(t/T) .* cos(pi*r*t/T) ./ (1 - (2*r*t/T).^2);
-p_s_t(isnan(p_s_t)) = 0; % Avoid division by zero errors
+p_s_t(abs(2*r*t/T) == 1) = 0; % Prevent division errors
+p_s_t = p_s_t / max(abs(p_s_t)); % Normalize to prevent zeroing out
+
 
 % Generate s(t) and s_s(t)
 s = [];
@@ -61,18 +63,21 @@ grid on;
 
 %% 3. Up-conversion
 fc = 5; % Carrier frequency in Hz
+
+% Perform up-conversion
 u = s .* cos(2*pi*fc*t_full);
 u_s = s_s .* cos(2*pi*fc*t_full);
 
-% Normalize u_s to prevent near-zero FFT values
-if max(abs(u_s)) > 0
-    u_s = u_s / max(abs(u_s)); % Normalize to avoid small values
-end
-disp('First few values of u_s(t):');
+% Debugging: Check if u and u_s are nonzero
+disp('First few values of u_s(t) before FFT:');
 disp(u_s(1:10));
 
-disp('Max value of u_s(t):');
-disp(max(abs(u_s)));
+% Normalize u_s to avoid very small values
+if max(abs(u_s)) > 0
+    u_s = u_s / max(abs(u_s));
+else
+    warning('u_s(t) is all zeros. Check baseband signal generation.');
+end
 
 % Compute FFT
 U = fftshift(abs(fft(u)));
@@ -97,6 +102,7 @@ xlabel('Frequency (Hz)');
 ylabel('Power (dB)');
 grid on;
 xlim([-fc-5 fc+5]); % Focus on carrier region
+
 
 
 %% 4. Down-conversion and Filtering
